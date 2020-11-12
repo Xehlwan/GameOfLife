@@ -1,71 +1,81 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Text;
+using System.Threading;
 
 namespace GameOfLife
 {
     class Game
     {
-        public int Width { get; }
-        public int Height { get; }
-        public int RealHeight { get; }
-        private bool[,] CurrentGen;
+        private ConsoleColor alive = ConsoleColor.Yellow;
+        private readonly ConsoleColor dead = ConsoleColor.Black;
+        public int CharColumns { get; }
+        public int PixelHeight { get; }
+        public int CharRows { get; }
+        public int PixelWidth => CharColumns;
+
+        private bool[,] currentGen;
         private bool[,] nextGen;
-        private char[] screen;
+
+        private readonly Random rng = new();
+        private readonly StringBuilder sb = new();
 
         public Game(int width, int height)
         {
-            this.Width = width;
-            Height = height;
-            RealHeight = Height / 2;
-            CurrentGen = new bool[Width, Height];
-            nextGen = new bool[Width, Height];
-            screen = new char[Width * RealHeight];
+            // Set the game to valid dimensions.
+            if (height % 2 != 0) height -= 1;
+            CharColumns = width <= Console.LargestWindowWidth ? width : Console.LargestWindowWidth;
+            CharRows = height / 2 <= Console.LargestWindowHeight ? height / 2 : Console.LargestWindowHeight;
+            PixelHeight = CharRows * 2;
 
-            Console.WindowHeight = RealHeight < Console.BufferHeight ? RealHeight : Console.BufferHeight;
-            Console.WindowWidth = Width < Console.BufferWidth ? Width : Console.BufferWidth;
-            Console.SetBufferSize(Width, RealHeight);
-            Console.SetWindowSize(Width, RealHeight);
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.BackgroundColor = ConsoleColor.Black;
-            Console.OutputEncoding = Encoding.Unicode;
-            Console.InputEncoding = Encoding.Unicode;
+            // Initialize arrays.
+            currentGen = new bool[PixelWidth, PixelHeight];
+            nextGen = new bool[PixelWidth, PixelHeight];
+
+            // Prepare Terminal
+            Console.WindowHeight = CharRows <= Console.BufferHeight ? CharRows : Console.BufferHeight;
+            Console.WindowWidth = CharColumns <= Console.BufferWidth ? CharColumns : Console.BufferWidth;
+            Console.SetBufferSize(CharColumns, CharRows);
+            Console.SetWindowSize(CharColumns, CharRows);
+
             Console.CursorVisible = false;
+
+            Console.ForegroundColor = alive;
+            Console.BackgroundColor = dead;
         }
 
         public void RandomSeed()
         {
-            var rng = new Random();
-            for (int x = 0; x < Width; x++)
+            for (int x = 0; x < PixelWidth; x++)
             {
-                for (int y = 0; y < Height; y++)
+                for (int y = 0; y < PixelHeight; y++)
                 {
-                    CurrentGen[x, y] = rng.Next(0, 2) == 1;
+                    currentGen[x, y] = rng.Next(0, 2) == 1;
                 }
             }
         }
 
         public void Tick()
         {
-            for (int x = 0; x < Width; x++)
+            for (int x = 0; x < CharColumns; x++)
             {
-                for (int y = 0; y < Height; y++)
+                for (int y = 0; y < PixelHeight; y++)
                 {
                     int neighbors = 0;
                     for (int nx = x - 1; nx <= x + 1; nx++)
                     {
-                        if (nx < 0 || nx >= Width) continue;
+                        if (nx < 0 || nx >= CharColumns) continue;
                         for (int ny = y - 1; ny <= y + 1; ny++)
                         {
-                            if (ny < 0 || ny >= Height || (nx == x && ny == y)) continue;
-                            if (CurrentGen[nx, ny]) neighbors++;
+                            if (ny < 0 || ny >= PixelHeight || (nx == x && ny == y)) continue;
+                            if (currentGen[nx, ny]) neighbors++;
                         }
                     }
 
-                    if (CurrentGen[x, y])
+                    if (currentGen[x, y])
                     {
-                        if (neighbors < 2) nextGen[x, y] = false;
-                        else if (neighbors > 3)
+                        if (neighbors < 2 || neighbors > 3) 
                             nextGen[x, y] = false;
                         else
                             nextGen[x, y] = true;
@@ -77,24 +87,22 @@ namespace GameOfLife
                 }
             }
 
-            var temp = CurrentGen;
-            CurrentGen = nextGen;
-            nextGen = temp;
+            (currentGen, nextGen) = (nextGen, currentGen);
         }
 
         public void TickWrap()
         {
-            for (int x = 0; x < Width; x++)
+            for (int x = 0; x < CharColumns; x++)
             {
-                for (int y = 0; y < Height; y++)
+                for (int y = 0; y < PixelHeight; y++)
                 {
                     int neighbors = 0;
                     for (int nx = x - 1; nx <= x + 1; nx++)
                     {
                         int tx;
                         if (nx < 0) 
-                            tx = Width - 1;
-                        else if (nx >= Width)
+                            tx = CharColumns - 1;
+                        else if (nx >= CharColumns)
                             tx = 0;
                         else
                             tx = nx;
@@ -103,16 +111,16 @@ namespace GameOfLife
                             if (nx == x && ny == y) continue;
                             int ty;
                             if (ny < 0) 
-                                ty = Height - 1;
-                            else if (ny >= Height)
+                                ty = PixelHeight - 1;
+                            else if (ny >= PixelHeight)
                                 ty = 0;
                             else
                                 ty = ny;
-                            if (CurrentGen[tx, ty]) neighbors++;
+                            if (currentGen[tx, ty]) neighbors++;
                         }
                     }
 
-                    if (CurrentGen[x, y])
+                    if (currentGen[x, y])
                     {
                         if (neighbors < 2) nextGen[x, y] = false;
                         else if (neighbors > 3)
@@ -127,33 +135,46 @@ namespace GameOfLife
                 }
             }
 
-            var temp = CurrentGen;
-            CurrentGen = nextGen;
-            nextGen = temp;
+            (currentGen, nextGen) = (nextGen, currentGen);
         }
 
+        public void SetColor(ConsoleColor color)
+        {
+            alive = color;
+            Console.ForegroundColor = alive;
+        }
 
         public void Render()
         {
-            Console.SetCursorPosition(0, 0);
-            //Console.Clear();
+            PrepareCharBuffer();
+            DrawScreen();
+        }
 
-            for (int ry = 0, gy = 0; ry < RealHeight; ry++, gy += 2)
+        private void DrawScreen()
+        {
+            Console.SetCursorPosition(0,0);
+            Console.Write(sb.ToString());
+        }
+
+        private void PrepareCharBuffer()
+        {
+            sb.Clear();
+            for (int y = 0; y < CharRows; y++)
             {
-                for (int x = 0; x < Width; x++)
+                for (int x = 0; x < CharColumns; x++)
                 {
-                    var top = CurrentGen[x, gy];
-                    var bottom = CurrentGen[x, gy + 1];
-                    if (top && bottom) screen[x + ry * Width] = '\u2588';
-                    else if (top && !bottom) screen[x + ry * Width] = '\u2580';
-                    else if (!top && bottom)
-                        screen[x + ry * Width] = '\u2584';
-                    else
-                        screen[x + ry * Width] = '\uFEFF';
+                    (bool Top, bool Bottom) status = (currentGen[x, y * 2], currentGen[x, y * 2 + 1]);
+                    char c = status switch
+                    {
+                        (true, true) => '\u2588',
+                        (true, false) => '\u2580',
+                        (false, true) => '\u2584',
+                        (false, false) => '\u0020'
+                    };
+
+                    sb.Append(c);
                 }
             }
-
-            Console.Write(screen);
         }
     }
 }
